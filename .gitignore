@@ -1,0 +1,5 @@
+*.diff
+*.patch
+*.o
+config.h
+slock

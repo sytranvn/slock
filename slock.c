@@ -22,6 +22,11 @@
 #include "arg.h"
 #include "util.h"
 
+#include <X11/XF86keysym.h>
+#define LENGTH(X)       (sizeof X / sizeof X[0])
+#define CLEANMASK(mask) (mask & ~(numlockmask|LockMask) & (ShiftMask|ControlMask|Mod1Mask|Mod2Mask|Mod3Mask|Mod4Mask|Mod5Mask))
+
+static unsigned int numlockmask = 0;
 char *argv0;
 
 enum {
@@ -30,6 +35,11 @@ enum {
 	FAILED,
 	NUMCOLS
 };
+
+typedef struct {
+	unsigned int mod;
+	KeySym keysym;
+} Passthrough;
 
 struct lock {
 	int screen;
@@ -130,7 +140,7 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 {
 	XRRScreenChangeNotifyEvent *rre;
 	char buf[32], passwd[256], *inputhash;
-	int num, screen, running, failure, oldc;
+	int num, screen, running, failure, oldc, i, passing;
 	unsigned int len, color;
 	KeySym ksym;
 	XEvent ev;
@@ -156,6 +166,20 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 			    IsPFKey(ksym) ||
 			    IsPrivateKeypadKey(ksym))
 				continue;
+
+			passing = 0;
+			for (i = 0; i < LENGTH(passthroughs); i++) {
+				if (ksym == passthroughs[i].keysym &&
+						CLEANMASK(passthroughs[i].mod) == CLEANMASK(ev.xkey.state)) {
+					passing = 1;
+					XSendEvent(dpy, DefaultRootWindow(dpy), True, KeyPressMask, &ev);
+					break;
+				}
+			}
+
+			if(passing)
+				continue;
+
 			switch (ksym) {
 			case XK_Return:
 				passwd[len] = '\0';
@@ -184,6 +208,8 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 				    (len + num < sizeof(passwd))) {
 					memcpy(passwd + len, buf, num);
 					len += num;
+				} else {
+					continue; /* Don't trigger fail screen when pressing control characters */
 				}
 				break;
 			}
@@ -317,7 +343,7 @@ main(int argc, char **argv) {
 
 	ARGBEGIN {
 	case 'v':
-		puts("slock-"VERSION);
+		fprintf(stderr, "slock-"VERSION"\n");
 		return 0;
 	default:
 		usage();
